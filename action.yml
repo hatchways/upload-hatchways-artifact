@@ -1,0 +1,19 @@
+name: 'Hatchways'
+description: 'Update Hatchways about tests that you ran for a specific repository'
+inputs:
+  api_key:
+    required: true
+    description: 'The API Key to reach the Hatchways API'
+  files:
+    required: true
+    description: 'A multiline input for files to send to the Hatchways API'
+  api_url:
+    required: false
+    description: 'The URL to ping on Hatchways'
+    default: 'https://app2.hatchways.io/api/github/actions/upload-artifacts'
+outputs:
+  status_code:
+    description: 'The response from Hatchways'
+runs:
+  using: 'node16'
+  main: 'dist/index.js'
