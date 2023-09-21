@@ -70,17 +70,12 @@ function run() {
             for (const fileName of parsedFiles) {
                 const globber = yield glob.create(fileName);
                 try {
-                    for (var _e = true, _f = (e_1 = void 0, __asyncValues(globber.globGenerator())), _g; _g = yield _f.next(), _a = _g.done, !_a;) {
+                    for (var _e = true, _f = (e_1 = void 0, __asyncValues(globber.globGenerator())), _g; _g = yield _f.next(), _a = _g.done, !_a; _e = true) {
                         _c = _g.value;
                         _e = false;
-                        try {
-                            const file = _c;
-                            if (SUPPORTED_FILE_TYPES.some(type => file.endsWith(type))) {
-                                allFiles.push(file);
-                            }
-                        }
-                        finally {
-                            _e = true;
+                        const file = _c;
+                        if (SUPPORTED_FILE_TYPES.some(type => file.endsWith(type))) {
+                            allFiles.push(file);
                         }
                     }
                 }
@@ -707,7 +702,7 @@ class OidcClient {
                 .catch(error => {
                 throw new Error(`Failed to get ID Token. \n 
         Error Code : ${error.statusCode}\n 
-        Error Message: ${error.result.message}`);
+        Error Message: ${error.message}`);
             });
             const id_token = (_a = res.result) === null || _a === void 0 ? void 0 : _a.value;
             if (!id_token) {
@@ -2768,6 +2763,19 @@ class HttpClientResponse {
             }));
         });
     }
+    readBodyBuffer() {
+        return __awaiter(this, void 0, void 0, function* () {
+            return new Promise((resolve) => __awaiter(this, void 0, void 0, function* () {
+                const chunks = [];
+                this.message.on('data', (chunk) => {
+                    chunks.push(chunk);
+                });
+                this.message.on('end', () => {
+                    resolve(Buffer.concat(chunks));
+                });
+            }));
+        });
+    }
 }
 exports.HttpClientResponse = HttpClientResponse;
 function isHttps(requestUrl) {
@@ -3272,7 +3280,13 @@ function getProxyUrl(reqUrl) {
         }
     })();
     if (proxyVar) {
-        return new URL(proxyVar);
+        try {
+            return new URL(proxyVar);
+        }
+        catch (_a) {
+            if (!proxyVar.startsWith('http://') && !proxyVar.startsWith('https://'))
+                return new URL(`http://${proxyVar}`);
+        }
     }
     else {
         return undefined;
@@ -3282,6 +3296,10 @@ exports.getProxyUrl = getProxyUrl;
 function checkBypass(reqUrl) {
     if (!reqUrl.hostname) {
         return false;
+    }
+    const reqHost = reqUrl.hostname;
+    if (isLoopbackAddress(reqHost)) {
+        return true;
     }
     const noProxy = process.env['no_proxy'] || process.env['NO_PROXY'] || '';
     if (!noProxy) {
@@ -3308,13 +3326,24 @@ function checkBypass(reqUrl) {
         .split(',')
         .map(x => x.trim().toUpperCase())
         .filter(x => x)) {
-        if (upperReqHosts.some(x => x === upperNoProxyItem)) {
+        if (upperNoProxyItem === '*' ||
+            upperReqHosts.some(x => x === upperNoProxyItem ||
+                x.endsWith(`.${upperNoProxyItem}`) ||
+                (upperNoProxyItem.startsWith('.') &&
+                    x.endsWith(`${upperNoProxyItem}`)))) {
             return true;
         }
     }
     return false;
 }
 exports.checkBypass = checkBypass;
+function isLoopbackAddress(host) {
+    const hostLower = host.toLowerCase();
+    return (hostLower === 'localhost' ||
+        hostLower.startsWith('127.') ||
+        hostLower.startsWith('[::1]') ||
+        hostLower.startsWith('[0:0:0:0:0:0:0:1]'));
+}
 //# sourceMappingURL=proxy.js.map
 
 /***/ }),
@@ -6160,6 +6189,9 @@ function range(a, b, str) {
   var i = ai;
 
   if (ai >= 0 && bi > 0) {
+    if(a===b) {
+      return [ai, bi];
+    }
     begs = [];
     left = str.length;
 
@@ -7868,6 +7900,9 @@ var WriteAfterEndError = createErrorType(
   "write after end"
 );
 
+// istanbul ignore next
+var destroy = Writable.prototype.destroy || noop;
+
 // An HTTP(S) request that can be redirected
 function RedirectableRequest(options, responseCallback) {
   // Initialize the request
@@ -7898,8 +7933,15 @@ function RedirectableRequest(options, responseCallback) {
 RedirectableRequest.prototype = Object.create(Writable.prototype);
 
 RedirectableRequest.prototype.abort = function () {
-  abortRequest(this._currentRequest);
+  destroyRequest(this._currentRequest);
+  this._currentRequest.abort();
   this.emit("abort");
+};
+
+RedirectableRequest.prototype.destroy = function (error) {
+  destroyRequest(this._currentRequest, error);
+  destroy.call(this, error);
+  return this;
 };
 
 // Writes buffered data to the current native request
@@ -8014,6 +8056,7 @@ RedirectableRequest.prototype.setTimeout = function (msecs, callback) {
     self.removeListener("abort", clearTimer);
     self.removeListener("error", clearTimer);
     self.removeListener("response", clearTimer);
+    self.removeListener("close", clearTimer);
     if (callback) {
       self.removeListener("timeout", callback);
     }
@@ -8040,6 +8083,7 @@ RedirectableRequest.prototype.setTimeout = function (msecs, callback) {
   this.on("abort", clearTimer);
   this.on("error", clearTimer);
   this.on("response", clearTimer);
+  this.on("close", clearTimer);
 
   return this;
 };
@@ -8191,7 +8235,7 @@ RedirectableRequest.prototype._processResponse = function (response) {
   }
 
   // The response is a redirect, so abort the current request
-  abortRequest(this._currentRequest);
+  destroyRequest(this._currentRequest);
   // Discard the remainder of the response to avoid waiting for data
   response.destroy();
 
@@ -8420,12 +8464,12 @@ function createErrorType(code, message, baseClass) {
   return CustomError;
 }
 
-function abortRequest(request) {
+function destroyRequest(request, error) {
   for (var event of events) {
     request.removeListener(event, eventHandlers[event]);
   }
   request.on("error", noop);
-  request.abort();
+  request.destroy(error);
 }
 
 function isSubdomain(subdomain, domain) {
@@ -15857,10 +15901,6 @@ function getNodeRequestOptions(request) {
 		agent = agent(parsedURL);
 	}
 
-	if (!headers.has('Connection') && !agent) {
-		headers.set('Connection', 'close');
-	}
-
 	// HTTP-network fetch step 4.2
 	// chunked encoding is handled by Node.js
 
@@ -16234,8 +16274,11 @@ function fixResponseChunkedTransferBadEnding(request, errorCallback) {
 
 		if (headers['transfer-encoding'] === 'chunked' && !headers['content-length']) {
 			response.once('close', function (hadError) {
+				// tests for socket presence, as in some situations the
+				// the 'socket' event is not triggered for the request
+				// (happens in deno), avoids `TypeError`
 				// if a data listener is still present we didn't end cleanly
-				const hasDataListener = socket.listenerCount('data') > 0;
+				const hasDataListener = socket && socket.listenerCount('data') > 0;
 
 				if (hasDataListener && !hadError) {
 					const err = new Error('Premature close');
@@ -16277,6 +16320,7 @@ exports.Headers = Headers;
 exports.Request = Request;
 exports.Response = Response;
 exports.FetchError = FetchError;
+exports.AbortError = AbortError;
 
 
 /***/ }),
@@ -19883,7 +19927,7 @@ module.exports = require("zlib");
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 "use strict";
-// Axios v1.3.6 Copyright (c) 2023 Matt Zabriskie and contributors
+// Axios v1.5.0 Copyright (c) 2023 Matt Zabriskie and contributors
 
 
 const FormData$1 = __nccwpck_require__(4334);
@@ -20453,8 +20497,9 @@ const reduceDescriptors = (obj, reducer) => {
   const reducedDescriptors = {};
 
   forEach(descriptors, (descriptor, name) => {
-    if (reducer(descriptor, name, obj) !== false) {
-      reducedDescriptors[name] = descriptor;
+    let ret;
+    if ((ret = reducer(descriptor, name, obj)) !== false) {
+      reducedDescriptors[name] = ret || descriptor;
     }
   });
 
@@ -20575,6 +20620,11 @@ const toJSONObject = (obj) => {
   return visit(obj, 0);
 };
 
+const isAsyncFn = kindOfTest('AsyncFunction');
+
+const isThenable = (thing) =>
+  thing && (isObject(thing) || isFunction(thing)) && isFunction(thing.then) && isFunction(thing.catch);
+
 const utils = {
   isArray,
   isArrayBuffer,
@@ -20624,7 +20674,9 @@ const utils = {
   ALPHABET,
   generateString,
   isSpecCompliantForm,
-  toJSONObject
+  toJSONObject,
+  isAsyncFn,
+  isThenable
 };
 
 /**
@@ -21231,10 +21283,6 @@ function formDataToJSON(formData) {
   return null;
 }
 
-const DEFAULT_CONTENT_TYPE = {
-  'Content-Type': undefined
-};
-
 /**
  * It takes a string, tries to parse it, and if it fails, it returns the stringified version
  * of the input
@@ -21264,7 +21312,7 @@ const defaults = {
 
   transitional: transitionalDefaults,
 
-  adapter: ['xhr', 'http'],
+  adapter: 'http' ,
 
   transformRequest: [function transformRequest(data, headers) {
     const contentType = headers.getContentType() || '';
@@ -21373,17 +21421,14 @@ const defaults = {
 
   headers: {
     common: {
-      'Accept': 'application/json, text/plain, */*'
+      'Accept': 'application/json, text/plain, */*',
+      'Content-Type': undefined
     }
   }
 };
 
-utils.forEach(['delete', 'get', 'head'], function forEachMethodNoData(method) {
+utils.forEach(['delete', 'get', 'head', 'post', 'put', 'patch'], (method) => {
   defaults.headers[method] = {};
-});
-
-utils.forEach(['post', 'put', 'patch'], function forEachMethodWithData(method) {
-  defaults.headers[method] = utils.merge(DEFAULT_CONTENT_TYPE);
 });
 
 const defaults$1 = defaults;
@@ -21719,7 +21764,17 @@ class AxiosHeaders {
 
 AxiosHeaders.accessor(['Content-Type', 'Content-Length', 'Accept', 'Accept-Encoding', 'User-Agent', 'Authorization']);
 
-utils.freezeMethods(AxiosHeaders.prototype);
+// reserved names hotfix
+utils.reduceDescriptors(AxiosHeaders.prototype, ({value}, key) => {
+  let mapped = key[0].toUpperCase() + key.slice(1); // map `set` => `Set`
+  return {
+    get: () => value,
+    set(headerValue) {
+      this[mapped] = headerValue;
+    }
+  }
+});
+
 utils.freezeMethods(AxiosHeaders);
 
 const AxiosHeaders$1 = AxiosHeaders;
@@ -21839,7 +21894,7 @@ function buildFullPath(baseURL, requestedURL) {
   return requestedURL;
 }
 
-const VERSION = "1.3.6";
+const VERSION = "1.5.0";
 
 function parseProtocol(url) {
   const match = /^([-+\w]{1,25})(:?\/\/|:)/.exec(url);
@@ -22309,6 +22364,21 @@ class ZlibHeaderTransformStream extends stream__default["default"].Transform {
 
 const ZlibHeaderTransformStream$1 = ZlibHeaderTransformStream;
 
+const callbackify = (fn, reducer) => {
+  return utils.isAsyncFn(fn) ? function (...args) {
+    const cb = args.pop();
+    fn.apply(this, args).then((value) => {
+      try {
+        reducer ? cb(null, ...reducer(value)) : cb(null, value);
+      } catch (err) {
+        cb(err);
+      }
+    }, cb);
+  } : fn;
+};
+
+const callbackify$1 = callbackify;
+
 const zlibOptions = {
   flush: zlib__default["default"].constants.Z_SYNC_FLUSH,
   finishFlush: zlib__default["default"].constants.Z_SYNC_FLUSH
@@ -22431,12 +22501,23 @@ const wrapAsync = (asyncExecutor) => {
 /*eslint consistent-return:0*/
 const httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
   return wrapAsync(async function dispatchHttpRequest(resolve, reject, onDone) {
-    let {data} = config;
+    let {data, lookup, family} = config;
     const {responseType, responseEncoding} = config;
     const method = config.method.toUpperCase();
     let isDone;
     let rejected = false;
     let req;
+
+    if (lookup && utils.isAsyncFn(lookup)) {
+      lookup = callbackify$1(lookup, (entry) => {
+        if(utils.isString(entry)) {
+          entry = [entry, entry.indexOf('.') < 0 ? 6 : 4];
+        } else if (!utils.isArray(entry)) {
+          throw new TypeError('lookup async function must return an array [ip: string, family: number]]')
+        }
+        return entry;
+      });
+    }
 
     // temporary internal emitter until the AxiosRequest class will be implemented
     const emitter = new EventEmitter__default["default"]();
@@ -22661,9 +22742,13 @@ const httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
       agents: { http: config.httpAgent, https: config.httpsAgent },
       auth,
       protocol,
+      family,
       beforeRedirect: dispatchBeforeRedirect,
       beforeRedirects: {}
     };
+
+    // cacheable-lookup integration hotfix
+    !utils.isUndefined(lookup) && (options.lookup = lookup);
 
     if (config.socketPath) {
       options.socketPath = config.socketPath;
@@ -23090,8 +23175,12 @@ const xhrAdapter = isXHRAdapterSupported && function (config) {
       }
     }
 
-    if (utils.isFormData(requestData) && (platform.isStandardBrowserEnv || platform.isStandardBrowserWebWorkerEnv)) {
-      requestHeaders.setContentType(false); // Let the browser set it
+    if (utils.isFormData(requestData)) {
+      if (platform.isStandardBrowserEnv || platform.isStandardBrowserWebWorkerEnv) {
+        requestHeaders.setContentType(false); // Let the browser set it
+      } else {
+        requestHeaders.setContentType('multipart/form-data;', false); // mobile/desktop app frameworks
+      }
     }
 
     let request = new XMLHttpRequest();
@@ -23497,7 +23586,7 @@ function mergeConfig(config1, config2) {
     headers: (a, b) => mergeDeepProperties(headersToObject(a), headersToObject(b), true)
   };
 
-  utils.forEach(Object.keys(config1).concat(Object.keys(config2)), function computeConfigValue(prop) {
+  utils.forEach(Object.keys(Object.assign({}, config1, config2)), function computeConfigValue(prop) {
     const merge = mergeMap[prop] || mergeDeepProperties;
     const configValue = merge(config1[prop], config2[prop], prop);
     (utils.isUndefined(configValue) && merge !== mergeDirectKeys) || (config[prop] = configValue);
@@ -23657,15 +23746,13 @@ class Axios {
     // Set config.method
     config.method = (config.method || this.defaults.method || 'get').toLowerCase();
 
-    let contextHeaders;
-
     // Flatten headers
-    contextHeaders = headers && utils.merge(
+    let contextHeaders = headers && utils.merge(
       headers.common,
       headers[config.method]
     );
 
-    contextHeaders && utils.forEach(
+    headers && utils.forEach(
       ['delete', 'get', 'head', 'post', 'put', 'patch', 'common'],
       (method) => {
         delete headers[method];
@@ -24074,6 +24161,8 @@ axios.mergeConfig = mergeConfig;
 axios.AxiosHeaders = AxiosHeaders$1;
 
 axios.formToJSON = thing => formDataToJSON(utils.isHTMLForm(thing) ? new FormData(thing) : thing);
+
+axios.getAdapter = adapters.getAdapter;
 
 axios.HttpStatusCode = HttpStatusCode$1;
 
