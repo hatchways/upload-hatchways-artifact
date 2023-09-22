@@ -1,4 +1,4 @@
-# Send Test Results to Hatchways
+# Send Artifacts to Hatchways
 
 This actions sends media files to the Hatchways Platform.
 
