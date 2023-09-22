@@ -24,4 +24,4 @@ jobs:
           api_key: ${{ secrets.HATCHWAYS_API_KEY }}
           files: |
             - outputs/*.xml
-          api_url: https://master-dot-hatchways-staging.uc.r.appspot.com/api/github/actions/automated-test-results
+          api_url: https://master-dot-hatchways-staging.uc.r.appspot.com/api/github/actions/upload-artifacts
